@@ -1,0 +1,63 @@
+name: MotorOptiX CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test MotorOptiX
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Conda
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        miniconda-version: "latest"
+        activate-environment: motoroptix
+        auto-activate-base: false
+        python-version: "3.10"
+    
+    - name: Install dependencies
+      shell: bash -l {0}
+      run: |
+        conda install -c conda-forge mamba
+        mamba env update -f environment.yml
+        conda activate motoroptix
+        pip install pytest-cov
+    
+    - name: Run tests with coverage
+      shell: bash -l {0}
+      run: |
+        conda activate motoroptix
+        pytest motoroptix/tests/ --cov=motoroptix --cov-report=xml
+    
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: coverage.xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+        flags: unittests
+        name: codecov-umbrella
+        verbose: true
+    
+    - name: Check test status
+      shell: bash -l {0}
+      run: |
+        conda activate motoroptix
+        if [ $? -ne 0 ]; then
+          echo "Tests failed!"
+          exit 1
+        fi
+        echo "All tests passed successfully!" 

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "motoroptix"
+version = "0.1.0"
+description = "A powerful open-source framework for multi-objective optimization of electric motors."
+authors = [{name = "Alessandro Intorbida", email = "alessandro.intorbida@gmail.com"}]
+license = {text = "MIT License"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # All heavy dependencies are managed by conda in environment.yml
+]
+
+[project.urls]
+"Homepage" = "https://github.com/alessandrointorbida/motoroptix"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "black",
+    "isort",
+    "flake8",
+    "mypy"
+]
+
+[tool.setuptools.packages.find]
+where = ["."] 

@@ -1,0 +1,42 @@
+name: motoroptix
+channels:
+  - conda-forge
+  - fenics
+  - defaults
+dependencies:
+  # Core Python and Scientific Computing
+  - python=3.10
+  - numpy>=2.1.0
+  - scipy>=1.12.0
+  - matplotlib>=3.8.0
+  - pandas
+  - plotly
+  - jupyter
+  - ipykernel
+  - h5py
+  - openpyxl
+  
+  # Development Tools
+  - black
+  - isort
+  - flake8
+  - mypy
+  - pytest
+  - pytest-cov
+  - mamba
+  
+  # Core Dependencies
+  - ezdxf>=1.4.2
+  - optuna>=4.3.0
+  - pydantic>=2.11.5
+  - shapely>=2.1.1
+  
+  # FEniCSx and Related Dependencies
+  - openmpi
+  - fenics-dolfinx
+  - gmsh>=4.13.1
+  
+  # Package Management
+  - pip
+  - pip:
+      - -e .  # Install the local package in editable mode 
