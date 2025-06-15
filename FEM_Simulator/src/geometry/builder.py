@@ -116,9 +116,11 @@ def build_geometry(model: MotorParameters, *, mesh_2d: bool = False) -> pv.PolyD
                 occ.rotate(inst, 0, 0, 0, 0, 0, 1,
                            2 * math.pi * k / slot.Zs)
                 cutters.extend(inst)
+            # Cut slots from stator but keep slot surfaces for further grouping
             stator_surf, _ = occ.cut([(2, stator_tag)], cutters,
-                                     removeObject=True, removeTool=True)
+                                     removeObject=True, removeTool=False)
             stator_tag = stator_surf[0][1]
+            slot_tags = [tag for dim, tag in cutters if dim == 2]
 
         # --------------------------------------------------------------
         # 2. Rotor ring and V-shaped magnet pockets
@@ -168,6 +170,8 @@ def build_geometry(model: MotorParameters, *, mesh_2d: bool = False) -> pv.PolyD
         gmsh.model.addPhysicalGroup(2, [rotor_tag], name="rotor_steel")
         if 'magnet_tags' in locals():
             gmsh.model.addPhysicalGroup(2, magnet_tags, name="magnets")
+        if 'slot_tags' in locals():
+            gmsh.model.addPhysicalGroup(2, slot_tags, name="slots_air")
         occ.synchronize()
         # --------------------------------------------------------------
         # 4. Mesh generation
