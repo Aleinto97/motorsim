@@ -8,6 +8,8 @@ from dolfinx import fem
 from dolfinx.fem.petsc import LinearProblem
 from dolfinx.io import gmshio
 from mpi4py import MPI
+import pyvista as pv
+from dolfinx import plot as dfx_plot
 
 
 def run_analysis(mesh_path: Path, phase_currents: dict[str, float] | None = None):
@@ -116,8 +118,20 @@ def run_analysis(mesh_path: Path, phase_currents: dict[str, float] | None = None
         )
         B.interpolate(expr)
 
-        print("--- Analysis Complete: Fields A_z and B computed ---")
-        return {"Az": Az, "B": B}
+        # ------------------------------------------------------------------
+        # 8. Convert to PyVista for visualization on rank 0
+        # ------------------------------------------------------------------
+        if MPI.COMM_WORLD.rank == 0:
+            cells, cell_types, geometry = dfx_plot.create_vtk_mesh(domain, domain.topology.dim)
+            grid = pv.UnstructuredGrid(cells, cell_types, geometry)
+            B_vec = B.x.array.reshape(-1, 2)
+            B_mag = np.linalg.norm(B_vec, axis=1)
+            grid.cell_data["B_mag"] = B_mag
+        else:
+            grid = None
+
+        print("--- Analysis Complete: Fields ready for visualization ---")
+        return {"Az": Az, "B": B, "grid": grid}
 
     except Exception as exc:
         print(f"ERROR during analysis: {exc}")
