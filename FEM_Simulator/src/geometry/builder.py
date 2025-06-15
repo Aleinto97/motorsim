@@ -69,7 +69,7 @@ def _points_and_faces() -> pv.PolyData:
 # Main API
 # ----------------------------------------------------------------------------
 
-def build_geometry(model: MotorParameters, *, mesh_2d: bool = False) -> pv.PolyData | None:  # noqa: C901
+def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: str | None = None) -> pv.PolyData | None:  # noqa: C901
     """Construct motor cross-section and optionally generate a 2-D mesh.
 
     Parameters
@@ -180,9 +180,13 @@ def build_geometry(model: MotorParameters, *, mesh_2d: bool = False) -> pv.PolyD
             gmsh.model.mesh.setSize(gmsh.model.getEntities(0), 0.003)
             gmsh.model.mesh.generate(2)
             mesh = _points_and_faces()
+            if save_path:
+                gmsh.write(save_path)
         else:
             gmsh.model.mesh.generate(1)
             mesh = _points_and_lines()
+            if save_path:
+                gmsh.write(save_path)
 
         return mesh
 
