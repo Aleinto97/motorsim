@@ -20,7 +20,7 @@ def run_analysis(mesh_path: Path, phase_currents: dict[str, float] | None = None
         # ------------------------------------------------------------------
         # 1. Load mesh and retrieve physical group names
         # ------------------------------------------------------------------
-        domain, cell_tags, _ = gmshio.read_from_msh(
+        domain, cell_tags, facet_tags = gmshio.read_from_msh(
             str(mesh_path), MPI.COMM_WORLD, 0, gdim=2
         )
 
@@ -86,7 +86,7 @@ def run_analysis(mesh_path: Path, phase_currents: dict[str, float] | None = None
             outer_bdy_tag = next(
                 t for t, n in tag_to_name.items() if n == "outer_boundary"
             )
-            facets_outer = np.where(cell_tags.indices == outer_bdy_tag)[0]
+            facets_outer = np.where(facet_tags.values == outer_bdy_tag)[0]
             bc_dofs = fem.locate_dofs_topological(V, domain.topology.dim - 1, facets_outer)
         except StopIteration:
             # Fallback: radial max
