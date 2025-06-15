@@ -37,20 +37,27 @@ def run_analysis(mesh_path: Path):
         DG0 = fem.functionspace(domain, ("DG", 0))  # Cell-wise constants
 
         # ------------------------------------------------------------------
-        # 3. Material properties (relative permeability)
+        # 3. Material properties (relative permeability) & source current
         # ------------------------------------------------------------------
         mu_r = fem.Function(DG0)
         mu_0 = scipy.constants.mu_0
+        Jz = fem.Function(DG0)  # out-of-plane source current density
 
-        # Default all cells to air (1.0)
-        mu_r.x.array.fill(1.0)
+        # Defaults
+        mu_r.x.array.fill(1.0)  # air everywhere
+        Jz.x.array.fill(0.0)
 
-        print("Assigning material properties…")
+        print("Assigning material properties and magnet sources…")
         for tag, name in tag_to_name.items():
+            cells = np.where(cell_tags.values == tag)[0]
             if name in {"stator_steel", "rotor_steel"}:
                 print(f"  - High µ on '{name}' (Tag {tag})")
-                cells = np.where(cell_tags.values == tag)[0]
                 mu_r.x.array[cells] = 1000.0
+            elif name == "magnets":
+                print(f"  - Permanent magnet region (Tag {tag}) → Jz source")
+                # Simple equivalent magnet source current density (A/m^2)
+                J_eq = 1e6  # placeholder value for demonstration
+                Jz.x.array[cells] = J_eq
 
         # ------------------------------------------------------------------
         # 4. Weak formulation  ∇·(1/µ ∇A) = 0
@@ -58,7 +65,7 @@ def run_analysis(mesh_path: Path):
         u = ufl.TrialFunction(V)
         v = ufl.TestFunction(V)
         a = (1.0 / (mu_0 * mu_r)) * ufl.dot(ufl.grad(u), ufl.grad(v)) * ufl.dx
-        L = fem.Constant(domain, 0.0) * v * ufl.dx  # no source currents yet
+        L = Jz * v * ufl.dx
 
         # ------------------------------------------------------------------
         # 5. Boundary condition  A = 0 on outer boundary (named in gmsh)
