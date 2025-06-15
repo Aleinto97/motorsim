@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTextEdit,
     QFormLayout,
+    QDoubleSpinBox,
+    QLabel,
 )
 
 
@@ -38,6 +40,19 @@ class MesherPanel(QWidget):
         self.analysis_button.setEnabled(False)
         form.addRow(self.analysis_button)
 
+        # Phase current inputs
+        current_group = QGroupBox("Phase Currents (A rms)")
+        current_form = QFormLayout(current_group)
+        self.phase_inputs = {}
+        for phase in ("A", "B", "C"):
+            spin = QDoubleSpinBox()
+            spin.setRange(-1000.0, 1000.0)
+            spin.setDecimals(1)
+            spin.setValue(0.0)
+            self.phase_inputs[phase] = spin
+            current_form.addRow(QLabel(f"Phase {phase}"), spin)
+        form.addRow(current_group)
+
         layout.addWidget(group)
         layout.addStretch()
 
@@ -59,6 +74,10 @@ class MesherPanel(QWidget):
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
+    def get_phase_currents(self) -> dict[str, float]:
+        """Return current values for phases A/B/C as a dict."""
+        return {ph: spin.value() for ph, spin in self.phase_inputs.items()}
+
     def _on_run_analysis_clicked(self) -> None:
         """Emit run_analysis_requested with stored mesh path."""
         if self._mesh_file_path is not None:

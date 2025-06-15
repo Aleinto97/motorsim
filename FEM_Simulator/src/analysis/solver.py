@@ -10,7 +10,7 @@ from dolfinx.io import gmshio
 from mpi4py import MPI
 
 
-def run_analysis(mesh_path: Path):
+def run_analysis(mesh_path: Path, phase_currents: dict[str, float] | None = None):
     """Run a simple 2-D magnetostatic solve on the given mesh."""
     print("\n--- Running Magnetostatic Analysis ---")
 
@@ -47,7 +47,10 @@ def run_analysis(mesh_path: Path):
         mu_r.x.array.fill(1.0)  # air everywhere
         Jz.x.array.fill(0.0)
 
-        print("Assigning material properties and magnet sources…")
+        print("Assigning material properties, magnets and windings…")
+        if phase_currents is None:
+            phase_currents = {"A": 0.0, "B": 0.0, "C": 0.0}
+
         for tag, name in tag_to_name.items():
             cells = np.where(cell_tags.values == tag)[0]
             if name in {"stator_steel", "rotor_steel"}:
@@ -58,6 +61,13 @@ def run_analysis(mesh_path: Path):
                 # Simple equivalent magnet source current density (A/m^2)
                 J_eq = 1e6  # placeholder value for demonstration
                 Jz.x.array[cells] = J_eq
+            elif name.startswith("phase_"):
+                phase = name.split("_")[1]
+                I = phase_currents.get(phase, 0.0)
+                if abs(I) > 0:
+                    print(f"  - Applying current {I} A to {name}")
+                    J_phase = I * 1e6  # placeholder scaling
+                    Jz.x.array[cells] = J_phase
 
         # ------------------------------------------------------------------
         # 4. Weak formulation  ∇·(1/µ ∇A) = 0

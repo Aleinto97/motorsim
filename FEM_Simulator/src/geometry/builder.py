@@ -184,6 +184,14 @@ def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: 
             gmsh.model.addPhysicalGroup(2, magnet_tags, name="magnets")
         if 'slot_tags' in locals():
             gmsh.model.addPhysicalGroup(2, slot_tags, name="slots_air")
+            # Split slots into three phase groups (A/B/C) sequentially
+            phase_groups = {"A": [], "B": [], "C": []}
+            for idx, tag in enumerate(slot_tags):
+                phase = "ABC"[idx % 3]
+                phase_groups[phase].append(tag)
+            for phase, tags in phase_groups.items():
+                if tags:
+                    gmsh.model.addPhysicalGroup(2, tags, name=f"phase_{phase}")
         occ.synchronize()
         # --------------------------------------------------------------
         # 4. Mesh generation

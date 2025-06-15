@@ -107,4 +107,5 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def run_solver(self, mesh_path: Path) -> None:
         """Invoked when the user clicks the Run Analysis button."""
-        run_analysis(mesh_path)
+        phase_currents = self.mesher_panel.get_phase_currents()
+        run_analysis(mesh_path, phase_currents)
