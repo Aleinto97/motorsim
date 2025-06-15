@@ -186,13 +186,13 @@ def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: 
         # Determine and tag the outer stator boundary curve (after sync)
         try:
             boundaries = gmsh.model.getBoundary([(2, stator_tag)], oriented=False, recursive=True)
-            outer = []
-            for dim, tag in boundaries:
-                com = gmsh.model.getCenterOfMass(dim, tag)
-                if np.isclose(np.hypot(com[0], com[1]), s.Rext, rtol=1e-3):
-                    outer.append(tag)
-            if outer:
-                gmsh.model.addPhysicalGroup(1, outer, name="outer_boundary")
+            # pick curve(s) with maximum radial center-of-mass as outer boundary
+            if boundaries:
+                radii = [np.hypot(*gmsh.model.getCenterOfMass(dim, tag)[:2]) for dim, tag in boundaries]
+                max_r = max(radii)
+                outer = [tag for (dim, tag), r in zip(boundaries, radii) if np.isclose(r, max_r, rtol=1e-3)]
+                if outer:
+                    gmsh.model.addPhysicalGroup(1, outer, name="outer_boundary")
         except Exception as _:
             pass
         # --------------------------------------------------------------
