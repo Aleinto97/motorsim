@@ -168,6 +168,18 @@ def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: 
         # --------------------------------------------------------------
         gmsh.model.addPhysicalGroup(2, [stator_tag], name="stator_steel")
         gmsh.model.addPhysicalGroup(2, [rotor_tag], name="rotor_steel")
+
+        # --- NEW: capture outer stator boundary (curve) for solver BC ---
+        stator_outer_boundary = gmsh.model.getBoundary([(2, stator_tag)], oriented=False, recursive=True)
+        outer_edge_tag = -1
+        for edge in stator_outer_boundary:
+            # edge = (1, tag)
+            com = gmsh.model.occ.getCenterOfMass(edge[0], edge[1])
+            if np.isclose(np.sqrt(com[0] ** 2 + com[1] ** 2), s.Rext, rtol=1e-3):
+                outer_edge_tag = edge[1]
+                break
+        if outer_edge_tag != -1:
+            gmsh.model.addPhysicalGroup(1, [outer_edge_tag], name="outer_boundary")
         if 'magnet_tags' in locals():
             gmsh.model.addPhysicalGroup(2, magnet_tags, name="magnets")
         if 'slot_tags' in locals():
