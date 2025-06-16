@@ -87,7 +87,10 @@ def run_analysis(mesh_path: Path, phase_currents: dict[str, float] | None = None
                 t for t, n in tag_to_name.items() if n == "outer_boundary"
             )
             facets_outer = np.where(facet_tags.values == outer_bdy_tag)[0]
-            bc_dofs = fem.locate_dofs_topological(V, domain.topology.dim - 1, facets_outer)
+            if facets_outer.size:
+                bc_dofs = fem.locate_dofs_topological(V, domain.topology.dim - 1, facets_outer)
+            else:
+                raise RuntimeError("Outer boundary facets not found.")
         except StopIteration:
             # Fallback: use nodes near stator outer radius
             Rext_est = np.sqrt(np.max(np.sum(domain.geometry.x[:, :2] ** 2, axis=1)))
