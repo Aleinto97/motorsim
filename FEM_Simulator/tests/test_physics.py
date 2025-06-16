@@ -1,9 +1,13 @@
+import platform
 import tempfile
 from pathlib import Path
-
-import numpy as np
 import pytest
 
+# Skip on macOS arm due to dolfinx mesh import crash
+if platform.system() == "Darwin":
+    pytest.skip("dolfinx segfaults on macOS arm when importing mesh", allow_module_level=True)
+
+import numpy as np
 from src.core.models import MotorParameters
 from src.geometry.builder import build_geometry
 from src.analysis.solver import run_analysis
