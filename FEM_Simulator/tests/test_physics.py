@@ -3,9 +3,7 @@ import tempfile
 from pathlib import Path
 import pytest
 
-# Skip on macOS arm due to dolfinx mesh import crash
-if platform.system() == "Darwin":
-    pytest.skip("dolfinx segfaults on macOS arm when importing mesh", allow_module_level=True)
+# macOS ARM crash workaround removed after forcing linear mesh
 
 import numpy as np
 from src.core.models import MotorParameters

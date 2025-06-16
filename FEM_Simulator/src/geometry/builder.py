@@ -69,6 +69,8 @@ def _points_and_faces() -> pv.PolyData:
 # Main API
 # ----------------------------------------------------------------------------
 
+# Previous build_geometry replaced with cut-based implementation
+
 def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: str | None = None) -> pv.PolyData | None:
     """Construct motor cross-section using robust Gmsh OCC *fragment* operation.
 
@@ -195,6 +197,9 @@ def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: 
         # 6. Mesh
         # --------------------------------------------------------------
         if mesh_2d:
+            # Force linear first-order triangles for dolfinx compatibility
+            gmsh.option.setNumber("Mesh.ElementOrder", 1)
+            gmsh.option.setNumber("Mesh.SecondOrderIncomplete", 1)
             gmsh.model.mesh.setSize(gmsh.model.getEntities(0), 0.003)
             gmsh.model.mesh.generate(2)
             mesh = _points_and_faces()
