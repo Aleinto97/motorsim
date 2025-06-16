@@ -69,25 +69,18 @@ def _points_and_faces() -> pv.PolyData:
 # Main API
 # ----------------------------------------------------------------------------
 
-def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: str | None = None) -> pv.PolyData | None:  # noqa: C901
-    """Construct motor cross-section and optionally generate a 2-D mesh.
+def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: str | None = None) -> pv.PolyData | None:
+    """Construct motor cross-section using robust Gmsh OCC *fragment* operation.
 
-    Parameters
-    ----------
-    model : MotorParameters
-        Dataclass holding **stator**, **rotor**, **slot**, and **V-hole** specs.
-    mesh_2d : bool, default False
-        When *True* a triangular surface mesh is returned, otherwise a 1-D
-        outline suitable for quick preview.
+    The routine builds all primitives first, then performs a single fragment
+    so every resulting surface inherits a valid physical tag.  This avoids the
+    missing-tag issues seen with multiple *cut* operations.
     """
 
-    s = model.stator
-    r = model.rotor
-    slot = s.slot
-    hole = r.hole_v
+    s, r = model.stator, model.rotor
+    slot, hole = s.slot, r.hole_v
 
     if not (0 < r.Rint < r.Rext < s.Rint < s.Rext):
-        print("ERROR: Invalid radii hierarchy – abort.")
         return None
 
     try:
@@ -95,125 +88,126 @@ def build_geometry(model: MotorParameters, *, mesh_2d: bool = False, save_path: 
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.model.add("motor")
         occ = gmsh.model.occ
+
         # --------------------------------------------------------------
-        # 1. Stator ring and axial slots
+        # 1. Create stator and rotor rings (as surfaces)
         # --------------------------------------------------------------
         stator_outer = occ.addDisk(0, 0, 0, s.Rext, s.Rext)
         stator_inner = occ.addDisk(0, 0, 0, s.Rint, s.Rint)
-        stator_surf, _ = occ.cut([(2, stator_outer)], [(2, stator_inner)],
-                                 removeObject=True, removeTool=True)
-        stator_tag = stator_surf[0][1]
+        stator_ring, _ = occ.cut([(2, stator_outer)], [(2, stator_inner)])
 
-        if slot.Zs > 0:
-            cutter_h = slot.H2 + 0.001  # tiny tolerance to fully cut through
+        rotor_outer = occ.addDisk(0, 0, 0, r.Rext, r.Rext)
+        rotor_inner = occ.addDisk(0, 0, 0, r.Rint, r.Rint)
+        rotor_ring, _ = occ.cut([(2, rotor_outer)], [(2, rotor_inner)])
+
+        # --------------------------------------------------------------
+        # 2. Slot cutters
+        # --------------------------------------------------------------
+        slot_cutters: list[tuple[int, int]] = []
+        if slot.Zs:
+            cutter_h = slot.H2 + 1e-3
             cutter_w = slot.W2
             start_r = s.Rint - 5e-4
-            base_cut = occ.addRectangle(start_r, -cutter_w / 2, 0,
-                                         cutter_h, cutter_w)
-            cutters: List[tuple[int, int]] = []
+            slot_rect = occ.addRectangle(start_r, -cutter_w / 2, 0, cutter_h, cutter_w)
             for k in range(slot.Zs):
-                inst = occ.copy([(2, base_cut)])
-                occ.rotate(inst, 0, 0, 0, 0, 0, 1,
-                           2 * math.pi * k / slot.Zs)
-                cutters.extend(inst)
-            # Cut slots from stator but keep slot surfaces for further grouping
-            stator_surf, _ = occ.cut([(2, stator_tag)], cutters,
-                                     removeObject=True, removeTool=False)
-            stator_tag = stator_surf[0][1]
-            slot_tags = [tag for dim, tag in cutters if dim == 2]
+                inst = occ.copy([(2, slot_rect)])
+                occ.rotate(inst, 0, 0, 0, 0, 0, 1, 2 * math.pi * k / slot.Zs)
+                slot_cutters.extend(inst)
 
         # --------------------------------------------------------------
-        # 2. Rotor ring and V-shaped magnet pockets
+        # 3. Magnet pocket cutters (V-shape simplified)
         # --------------------------------------------------------------
-        rotor_outer = occ.addDisk(0, 0, 0, r.Rext, r.Rext)
-        shaft_bore = occ.addDisk(0, 0, 0, r.Rint, r.Rint)
-        rotor_surf, _ = occ.cut([(2, rotor_outer)], [(2, shaft_bore)],
-                                removeObject=True, removeTool=True)
-        rotor_tag = rotor_surf[0][1]
-
-        if hole.Zh > 0:
-            mag = hole.magnet_left  # both magnets identical size
-            # build two rectangles, rotate symmetrically to form a V-pocket
+        magnet_cutters: list[tuple[int, int]] = []
+        if hole.Zh:
+            mag = hole.magnet_left
+            # central rectangle pair forming V
             rect1 = occ.addRectangle(-mag.Wmag / 2, 0, 0, mag.Wmag, mag.Hmag)
             rect2 = occ.copy([(2, rect1)])
-
-            radial_offset = r.Rext - hole.H1 - mag.Hmag / 2 - hole.H2
-            pocket_angle = math.asin(hole.W1 / (2 * (r.Rext - hole.H1)))
-
-            occ.rotate([(2, rect1)], 0, 0, 0, 0, 0, 1, -pocket_angle)
+            radial_offset = r.Rext - hole.H1 - hole.H2 - mag.Hmag / 2
+            angle = math.asin(hole.W1 / (2 * radial_offset))
+            occ.rotate([(2, rect1)], 0, 0, 0, 0, 0, 1, -angle)
             occ.translate([(2, rect1)], 0, radial_offset, 0)
-
-            occ.rotate(rect2, 0, 0, 0, 0, 0, 1, pocket_angle)
+            occ.rotate(rect2, 0, 0, 0, 0, 0, 1, angle)
             occ.translate(rect2, 0, radial_offset, 0)
-
             v_pocket, _ = occ.fuse([(2, rect1)], rect2)
-
-            cutters: List[tuple[int, int]] = []
             for k in range(hole.Zh):
                 inst = occ.copy(v_pocket)
-                occ.rotate(inst, 0, 0, 0, 0, 0, 1,
-                           2 * math.pi * k / hole.Zh)
-                cutters.extend(inst)
-
-            # Cut pockets from rotor but KEEP the pocket surfaces (future magnets)
-            rotor_surf, _ = occ.cut([(2, rotor_tag)], cutters,
-                                     removeObject=True, removeTool=False)
-            rotor_tag = rotor_surf[0][1]
-
-            # Store pocket surfaces as magnets for grouping
-            magnet_tags = [tag for dim, tag in cutters if dim == 2]
+                occ.rotate(inst, 0, 0, 0, 0, 0, 1, 2 * math.pi * k / hole.Zh)
+                magnet_cutters.extend(inst)
 
         # --------------------------------------------------------------
-        # 3. Physical groups and OCC sync
+        # 4. Fragment all surfaces
         # --------------------------------------------------------------
-        gmsh.model.addPhysicalGroup(2, [stator_tag], name="stator_steel")
-        gmsh.model.addPhysicalGroup(2, [rotor_tag], name="rotor_steel")
-
-
-        if 'magnet_tags' in locals():
-            gmsh.model.addPhysicalGroup(2, magnet_tags, name="magnets")
-        if 'slot_tags' in locals():
-            gmsh.model.addPhysicalGroup(2, slot_tags, name="slots_air")
-            # Split slots into three phase groups (A/B/C) sequentially
-            phase_groups = {"A": [], "B": [], "C": []}
-            for idx, tag in enumerate(slot_tags):
-                phase = "ABC"[idx % 3]
-                phase_groups[phase].append(tag)
-            for phase, tags in phase_groups.items():
-                if tags:
-                    gmsh.model.addPhysicalGroup(2, tags, name=f"phase_{phase}")
+        base_surfaces = stator_ring + rotor_ring
+        fragmented, _ = occ.fragment(base_surfaces, slot_cutters + magnet_cutters)
         occ.synchronize()
-        # Determine and tag the outer stator boundary curve (after sync)
-        try:
-            boundaries = gmsh.model.getBoundary([(2, stator_tag)], oriented=False, recursive=True)
-            # pick curve(s) with maximum radial center-of-mass as outer boundary
-            if boundaries:
-                radii = [np.hypot(*gmsh.model.getCenterOfMass(dim, tag)[:2]) for dim, tag in boundaries]
-                max_r = max(radii)
-                outer = [tag for (dim, tag), r in zip(boundaries, radii) if np.isclose(r, max_r, rtol=1e-3)]
-                if outer:
-                    gmsh.model.addPhysicalGroup(1, outer, name="outer_boundary")
-        except Exception as _:
-            pass
+
         # --------------------------------------------------------------
-        # 4. Mesh generation
+        # 5. Classify fragmented surfaces → physical groups
+        # --------------------------------------------------------------
+        pgroups: dict[str, list[int]] = {}
+        for dim, tag in fragmented:
+            if dim != 2:
+                continue
+            com = occ.getCenterOfMass(dim, tag)
+            radius = math.hypot(com[0], com[1])
+            # crude classification by radius
+            if radius > s.Rint:
+                pgroups.setdefault("stator_steel", []).append(tag)
+            elif radius > r.Rint:
+                # distinguish magnets by checking if tag is part of magnet cutters list
+                if any(tag == mc[1] for mc in magnet_cutters):
+                    pgroups.setdefault("magnets", []).append(tag)
+                else:
+                    pgroups.setdefault("rotor_steel", []).append(tag)
+
+        # Slot air surfaces: those inside stator inner radius minus small tol
+        for dim, tag in fragmented:
+            if dim != 2:
+                continue
+            com = occ.getCenterOfMass(dim, tag)
+            radius = math.hypot(com[0], com[1])
+            if radius < s.Rint - 1e-4 and radius > r.Rext + 1e-4:
+                pgroups.setdefault("slots_air", []).append(tag)
+
+        # Create physical groups
+        for name, tags in pgroups.items():
+            gmsh.model.addPhysicalGroup(2, tags, name=name)
+
+        # Phase groups for slots (assign sequentially)
+        if "slots_air" in pgroups:
+            for idx, tag in enumerate(pgroups["slots_air"]):
+                phase = "ABC"[idx % 3]
+                gmsh.model.addPhysicalGroup(2, [tag], name=f"phase_{phase}")
+
+        # Outer boundary curve
+        try:
+            boundaries = gmsh.model.getBoundary([(2, pgroups["stator_steel"][0])], oriented=False, recursive=True)
+            radii = [math.hypot(*occ.getCenterOfMass(dim, t)[:2]) for dim, t in boundaries]
+            max_r = max(radii)
+            outer = [t for (d, t), r in zip(boundaries, radii) if math.isclose(r, max_r, rel_tol=1e-3)]
+            if outer:
+                gmsh.model.addPhysicalGroup(1, outer, name="outer_boundary")
+        except Exception:
+            pass
+
+        # --------------------------------------------------------------
+        # 6. Mesh
         # --------------------------------------------------------------
         if mesh_2d:
             gmsh.model.mesh.setSize(gmsh.model.getEntities(0), 0.003)
             gmsh.model.mesh.generate(2)
             mesh = _points_and_faces()
-            if save_path:
-                gmsh.write(save_path)
         else:
             gmsh.model.mesh.generate(1)
             mesh = _points_and_lines()
-            if save_path:
-                gmsh.write(save_path)
 
+        if save_path:
+            gmsh.write(save_path)
         return mesh
 
-    except Exception as err:
-        print(f"ERROR: Geometry building failed: {err}")
+    except Exception as e:
+        print(f"ERROR fragment builder: {e}")
         return None
 
     finally:
