@@ -89,10 +89,13 @@ def run_analysis(mesh_path: Path, phase_currents: dict[str, float] | None = None
             facets_outer = np.where(facet_tags.values == outer_bdy_tag)[0]
             bc_dofs = fem.locate_dofs_topological(V, domain.topology.dim - 1, facets_outer)
         except StopIteration:
-            # Fallback: radial max
+            # Fallback: use nodes near stator outer radius
+            Rext_est = np.sqrt(np.max(np.sum(domain.geometry.x[:, :2] ** 2, axis=1)))
             bc_dofs = fem.locate_dofs_geometrical(
-                V, lambda x: np.isclose(np.linalg.norm(x, axis=0), domain.geometry.x[:, 0].max())
+                V, lambda x: np.isclose(np.sqrt(x[0] ** 2 + x[1] ** 2), Rext_est, rtol=1e-2)
             )
+        if bc_dofs.size == 0:
+            raise RuntimeError("Failed to locate boundary DOFs for Dirichlet BC.")
         bc = fem.dirichletbc(fem.Constant(domain, 0.0), bc_dofs, V)
 
         # ------------------------------------------------------------------
