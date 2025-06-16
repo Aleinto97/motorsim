@@ -54,7 +54,10 @@ def run_analysis(mesh_path: Path, phase_currents: dict[str, float] | None = None
             phase_currents = {"A": 0.0, "B": 0.0, "C": 0.0}
 
         for tag, name in tag_to_name.items():
+            # --- CRITICAL FIX: skip non-cell physical groups ---
             cells = np.where(cell_tags.values == tag)[0]
+            if cells.size == 0:
+                continue
             if name in {"stator_steel", "rotor_steel"}:
                 print(f"  - High µ on '{name}' (Tag {tag})")
                 mu_r.x.array[cells] = 1000.0
