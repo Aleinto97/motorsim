@@ -1,164 +1,213 @@
-"""Prototype sector-model geometry builder.
+"""True sector-model geometry builder using Gmsh OCC primitives.
 
-This file introduces *build_geometry_sector* which will eventually build a
-single fundamental sector (360° / Zs) of the motor cross-section, mesh it and –
-in a later iteration – optionally replicate the meshed sector to form the full
-machine.
-
-At this first incremental stage we **delegate** to the existing full-circle
-builder so that the rest of the application and tests keep working while we
-develop the sector workflow in isolation.
+This version replaces the earlier slice-and-dice stub.  It builds a single
+fundamental sector as clean CAD, tags all domains and important boundaries,
+and generates a 2-D mesh ready for solver consumption.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
+import math
+from typing import Dict, List, Tuple
 
-import pyvista as pv
-import numpy as np
+import gmsh
 
-from src.core.models import MotorParameters
-from src.geometry.builder import build_geometry  # fallback full-circle builder
+__all__ = [
+    "PhysicalGroup",
+    "build_geometry_sector",
+]
 
-__all__ = ["build_geometry_sector"]
+
+class PhysicalGroup:
+    """Canonical names and dimensions for Physical Groups used in the model."""
+
+    # 2-D domains (dim = 2)
+    STATOR_IRON = ("domain_stator_iron", 2)
+    ROTOR_IRON = ("domain_rotor_iron", 2)
+    AIR_GAP = ("domain_air_gap", 2)
+    MAGNET = ("domain_magnet", 2)
+    STATOR_COIL = ("domain_stator_coil", 2)
+
+    # 1-D boundaries (dim = 1)
+    BOUNDARY_PERIODIC_MASTER = ("boundary_periodic_master", 1)
+    BOUNDARY_PERIODIC_SLAVE = ("boundary_periodic_slave", 1)
+    BOUNDARY_SLIDING_INTERFACE = ("boundary_sliding_interface", 1)
+    BOUNDARY_STATOR_OUTER = ("boundary_stator_outer", 1)
+
+    # Convenience – iterable over all items
+    @classmethod
+    def items(cls):
+        return [
+            cls.STATOR_IRON,
+            cls.ROTOR_IRON,
+            cls.AIR_GAP,
+            cls.MAGNET,
+            cls.STATOR_COIL,
+            cls.BOUNDARY_PERIODIC_MASTER,
+            cls.BOUNDARY_PERIODIC_SLAVE,
+            cls.BOUNDARY_SLIDING_INTERFACE,
+            cls.BOUNDARY_STATOR_OUTER,
+        ]
 
 
-def build_geometry_sector(
-    model: MotorParameters,
-    *,
-    mesh_2d: bool = False,
-    save_path: Optional[str] = None,
-) -> Optional[pv.PolyData]:
-    """Temporary stub sector builder.
+# -----------------------------------------------------------------------------
+# Main builder – public API
+# -----------------------------------------------------------------------------
+
+def build_geometry_sector(motor_params: Dict, mesh_params: Dict) -> None:
+    """Create a watertight 2-D sector model via Gmsh OCC.
 
     Parameters
     ----------
-    model
-        Motor parameter dataclass instance.
-    mesh_2d
-        If *True* a 2-D triangular mesh is generated; otherwise a 1-D boundary
-        representation suitable for preview.
-    save_path
-        When given, the geometry/mesh is written to this file (usually
-        ``.msh``).
+    motor_params
+        Dictionary-style parameters describing the machine geometry.
+    mesh_params
+        Meshing options: ``global_size`` (float), ``interactive`` (bool), …
+
+    The routine leaves the created model loaded in the current Gmsh session so
+    that callers can directly query or export as they prefer.
     """
 
     # ------------------------------------------------------------------
-    # 1. Determine the fundamental geometric repetition factor.
+    # 0.  Initialise a fresh model
     # ------------------------------------------------------------------
-    # For an IPM machine the cross-section is periodic in the *least common
-    # multiple* sense between the stator-slot pitch (Zs) and the number of
-    # *magnet repetitions*.  A single V-shaped pocket holds *two* magnets,
-    # therefore the rotor presents ``2 * Zh`` repeating features.
-    #
-    # Example            Zs = 48  |  Zh = 8
-    # ------------------------------|-----------
-    # Rotor repetitions  = 16      |  360/16 = 22.5°
-    # Fundamental sector = 360 / gcd(48, 16) = 360 / 16 = 22.5°
-    #
-    # Should the user supply an unconventional combination where either Zs
-    # or Zh is zero/negative we fall back to the full-circle builder to
-    # keep the application functional.
-    from math import gcd, pi
-
-    Zs = model.stator.slot.Zs
-    Zh = model.rotor.hole_v.Zh
-
-    if Zs <= 0 or Zh <= 0:
-        # Degenerate configuration – punt to full-circle geometry.
-        return build_geometry(model, mesh_2d=mesh_2d, save_path=save_path)
-
-    rotor_repetitions = 2 * Zh
-    n_sym = gcd(Zs, rotor_repetitions)
-    sector_angle = 2 * pi / n_sym
-
-    # Store for downstream steps (meshing, PyVista transforms) – even though
-    # not yet used in this provisional implementation.
-    _meta: dict[str, float] = {
-        "n_sym": float(n_sym),
-        "sector_angle_rad": sector_angle,
-    }
+    gmsh.initialize()
+    gmsh.model.add(f"motor_sector_{motor_params.get('name', 'model')}")
 
     # ------------------------------------------------------------------
-    # 2. Generate the full-circle mesh using the proven routine and then
-    #    extract the 0–θ sector with a lightweight NumPy/PyVista pass.
+    # 1.  Sector geometry fundamentals
     # ------------------------------------------------------------------
+    n_slots = motor_params.get("num_slots", 12)
+    if n_slots <= 0:
+        raise ValueError("Number of slots (num_slots) must be a positive integer.")
 
-    full_mesh = build_geometry(model, mesh_2d=mesh_2d, save_path=None)
-    if full_mesh is None:
-        return None
+    sector_angle = 2 * math.pi / n_slots
 
-    sector_mesh = _extract_sector_mesh(full_mesh, angle_rad=sector_angle)
-    if sector_mesh is None or sector_mesh.n_points == 0:
-        # Extraction too aggressive – fall back.
-        sector_mesh = full_mesh
+    # Extract radii and feature sizes
+    r_so = motor_params["stator_outer_radius"]
+    r_si = motor_params["stator_inner_radius"]
+    r_ro = motor_params["rotor_outer_radius"]
+    r_ri = motor_params["rotor_inner_radius"]
+    slot_depth = motor_params["slot_depth"]
+    slot_width = motor_params["slot_width"]
+    magnet_height = motor_params["magnet_height"]
+
+    # Sliding interface radius (mid-air-gap)
+    r_slide = r_ro + (r_si - r_ro) / 2.0
 
     # ------------------------------------------------------------------
-    # 3. Optional – persist the sector mesh if the caller provided a path.
-    #    PyVista cannot write ``.msh`` directly, therefore we always write a
-    #    ``.vtk`` file in that case, while still honouring the original
-    #    extension if it is supported.
+    # 2.  Build OCC primitives
     # ------------------------------------------------------------------
+    # Helper: Wedge API – gmsh.model.occ.addWedge(x,y,z, outerR, innerR, angle)
+    stator_wedge = gmsh.model.occ.addWedge(0, 0, 0, r_so, r_si - slot_depth, sector_angle)
+    rotor_wedge = gmsh.model.occ.addWedge(0, 0, 0, r_ro, r_ri, sector_angle)
+    air_gap_wedge = gmsh.model.occ.addWedge(0, 0, 0, r_si, r_ro, sector_angle)
 
-    if save_path is not None:
-        out_path = Path(save_path)
-        try:
-            sector_mesh.save(out_path)
-        except (RuntimeError, ValueError):
-            # Fallback: change suffix to .vtk which PyVista always supports.
-            sector_mesh.save(out_path.with_suffix(".vtk"))
+    # Slot rectangle – initially centred then rotated to middle of sector
+    slot_x = (r_si - slot_depth / 2.0) * math.cos(sector_angle / 2.0)
+    slot_y = (r_si - slot_depth / 2.0) * math.sin(sector_angle / 2.0)
+    slot_rect = gmsh.model.occ.addRectangle(
+        slot_x - slot_width / 2.0,
+        slot_y - slot_depth / 2.0,
+        0,
+        slot_width,
+        slot_depth,
+    )
+    gmsh.model.occ.rotate([(2, slot_rect)], 0, 0, 0, 0, 0, 1, sector_angle / 2.0)
 
-    return sector_mesh
+    # Magnet rectangle – simplistic placement flush with rotor surface
+    magnet_rect = gmsh.model.occ.addRectangle(
+        r_ro - magnet_height,
+        -slot_width / 2.0,
+        0,
+        magnet_height,
+        slot_width,
+    )
+    gmsh.model.occ.rotate([(2, magnet_rect)], 0, 0, 0, 0, 0, 1, sector_angle / 2.0)
 
+    primitives: List[Tuple[int, int]] = [
+        (2, stator_wedge),
+        (2, rotor_wedge),
+        (2, air_gap_wedge),
+        (2, slot_rect),
+        (2, magnet_rect),
+    ]
 
-def _extract_sector_mesh(mesh: pv.PolyData, angle_rad: float) -> pv.PolyData:
-    """Return a **shallow** copy of *mesh* truncated to the 0–angle sector.
+    # ------------------------------------------------------------------
+    # 3.  Fragment & synchronise – the *Golden Rule*
+    # ------------------------------------------------------------------
+    out_tags, out_map = gmsh.model.occ.fragment([primitives[0]], primitives[1:])  # type: ignore[arg-type]
+    gmsh.model.occ.synchronize()
 
-    The helper takes a pragmatic approach suitable for early prototyping:
-    any cell (line or triangle) that has **all** its corner nodes strictly
-    inside the angular window is kept; partially-intersecting cells are
-    discarded.  The result therefore contains a small gap along the two
-    radial cutting planes which will be healed in a later iteration via
-    proper CAD construction.  For visualisation and high-level tests this
-    simplification is acceptable and guarantees fast execution without
-    additional Gmsh calls.
-    """
+    # ------------------------------------------------------------------
+    # 4.  Tag physical groups – domains first
+    # ------------------------------------------------------------------
+    phys_groups: Dict[str, List[int]] = {name: [] for name, _ in PhysicalGroup.items()}
 
-    # Normalise polar angle to the [0, 2π) range so that a single compare
-    # suffices for the 0–angle wedge.
-    theta = np.mod(np.arctan2(mesh.points[:, 1], mesh.points[:, 0]), 2 * np.pi)
-    inside_pt = theta <= angle_rad + 1e-10  # small tolerance to include boundary
+    def surf_center(tag: int) -> Tuple[float, float]:
+        x, y, _ = gmsh.model.occ.getCenterOfMass(2, tag)
+        return (x, y)
 
-    # Mapping old → new point indices for connectivity remapping.
-    idx_old_to_new = -np.ones(mesh.n_points, dtype=int)
-    idx_old_to_new[inside_pt] = np.arange(np.count_nonzero(inside_pt))
+    def r_theta(x: float, y: float) -> Tuple[float, float]:
+        return (math.hypot(x, y), math.atan2(y, x))
 
-    # --- Face connectivity ------------------------------------------------
-    new_faces: list[int] = []
-    if mesh.faces.size:
-        faces = mesh.faces.reshape(-1, 4)  # [N, n+1] with n triangles → n=3
-        for f in faces:
-            tri = f[1:]
-            if np.all(inside_pt[tri]):
-                new_faces.append(3)
-                new_faces.extend(idx_old_to_new[tri])
+    # Children of stator wedge distinguish iron vs coil via radius
+    for dim, tag in out_map[0]:  # children of stator_wedge
+        if dim != 2:
+            continue
+        r, _ = r_theta(*surf_center(tag))
+        if r > r_si - slot_depth / 2.0:
+            phys_groups[PhysicalGroup.STATOR_IRON[0]].append(tag)
+        else:
+            phys_groups[PhysicalGroup.STATOR_COIL[0]].append(tag)
 
-    # --- Line connectivity ------------------------------------------------
-    new_lines: list[int] = []
-    if mesh.lines.size:
-        lines = mesh.lines.reshape(-1, 3)  # [N, 1+2]
-        for l in lines:
-            seg = l[1:]
-            if np.all(inside_pt[seg]):
-                new_lines.append(2)
-                new_lines.extend(idx_old_to_new[seg])
+    # Direct mapping for other primitives
+    phys_groups[PhysicalGroup.ROTOR_IRON[0]].extend([t for d, t in out_map[1] if d == 2])
+    phys_groups[PhysicalGroup.AIR_GAP[0]].extend([t for d, t in out_map[2] if d == 2])
+    phys_groups[PhysicalGroup.MAGNET[0]].extend([t for d, t in out_map[4] if d == 2])
 
-    # Points for the new mesh -----------------------------------------------------------------
-    new_pts = mesh.points[inside_pt]
-    sector_mesh = pv.PolyData(new_pts)
-    if new_faces:
-        sector_mesh.faces = np.asarray(new_faces, dtype=int)
-    if new_lines:
-        sector_mesh.lines = np.asarray(new_lines, dtype=int)
-    return sector_mesh 
+    # ------------------------------------------------------------------
+    # 5.  Boundary tagging (dim = 1)
+    # ------------------------------------------------------------------
+    for _, tag in gmsh.model.getEntities(1):
+        x, y, _ = gmsh.model.occ.getCenterOfMass(1, tag)
+        r, theta = r_theta(x, y)
+
+        # Sliding interface
+        if abs(r - r_slide) < 1e-3:
+            phys_groups[PhysicalGroup.BOUNDARY_SLIDING_INTERFACE[0]].append(tag)
+        # Stator outer boundary
+        elif abs(r - r_so) < 1e-3:
+            phys_groups[PhysicalGroup.BOUNDARY_STATOR_OUTER[0]].append(tag)
+        # Periodic boundaries (master θ≈0, slave θ≈sector_angle)
+        elif abs(theta) < 1e-3 and r > r_ri:
+            phys_groups[PhysicalGroup.BOUNDARY_PERIODIC_MASTER[0]].append(tag)
+        elif abs(theta - sector_angle) < 1e-3 and r > r_ri:
+            phys_groups[PhysicalGroup.BOUNDARY_PERIODIC_SLAVE[0]].append(tag)
+
+    # Create physical groups in the model
+    for name, dim in PhysicalGroup.items():
+        tags = phys_groups[name]
+        if tags:
+            gmsh.model.addPhysicalGroup(dim, tags, name=name)
+
+    # ------------------------------------------------------------------
+    # 6.  Mesh generation
+    # ------------------------------------------------------------------
+    h_global = mesh_params.get("global_size", r_so / 20.0)
+    gmsh.model.mesh.setSize(gmsh.model.getEntities(0), h_global)
+
+    # Optional refinement in air gap
+    if phys_groups[PhysicalGroup.AIR_GAP[0]]:
+        air_gap_ent = phys_groups[PhysicalGroup.AIR_GAP[0]][0]
+        gmsh.model.mesh.setSize([(2, air_gap_ent)], (r_si - r_ro) / 4.0)
+
+    gmsh.model.mesh.generate(2)
+
+    if mesh_params.get("interactive", False):
+        gmsh.fltk.run()
+
+    print("Sector model built and meshed successfully.")
+
+# -----------------------------------------------------------------------------
+# End of file 
