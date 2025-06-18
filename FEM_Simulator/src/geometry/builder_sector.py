@@ -166,6 +166,19 @@ def build_geometry_sector(motor_params: Dict, mesh_params: Dict) -> None:
     phys_groups[PhysicalGroup.AIR_GAP[0]].extend([t for d, t in out_map[2] if d == 2])
     phys_groups[PhysicalGroup.MAGNET[0]].extend([t for d, t in out_map[4] if d == 2])
 
+    # Fallback: ensure stator iron is not empty – gather any remaining untagged
+    if not phys_groups[PhysicalGroup.STATOR_IRON[0]]:
+        untagged = {
+            tag
+            for dim, tag in gmsh.model.getEntities(2)
+            if dim == 2 and all(tag not in v for v in phys_groups.values())
+        }
+        for tag in untagged:
+            x, y = surf_center(tag)
+            r, _ = r_theta(x, y)
+            if r > r_si - slot_depth:
+                phys_groups[PhysicalGroup.STATOR_IRON[0]].append(tag)
+
     # ------------------------------------------------------------------
     # 5.  Boundary tagging (dim = 1)
     # ------------------------------------------------------------------
