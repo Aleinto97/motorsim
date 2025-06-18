@@ -1,7 +1,7 @@
 numpy
 pyvista
 gmsh
-fenics-dolfinx
+# fenics-dolfinx  # install separately via conda-forge
 pytest
 pytest-qt
 pytest-image-diff 
