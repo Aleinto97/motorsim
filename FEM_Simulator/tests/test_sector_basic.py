@@ -67,9 +67,9 @@ def test_build_succeeds_and_tags_correctly(
     slave_tag = _get_tag(PhysicalGroup.BOUNDARY_PERIODIC_SLAVE[0], 1)
     slide_tag = _get_tag(PhysicalGroup.BOUNDARY_SLIDING_INTERFACE[0], 1)
 
-    assert gmsh.model.getEntitiesForPhysicalGroup(1, master_tag), "Master periodic boundary empty"
-    assert gmsh.model.getEntitiesForPhysicalGroup(1, slave_tag), "Slave periodic boundary empty"
-    assert gmsh.model.getEntitiesForPhysicalGroup(1, slide_tag), "Sliding interface empty"
+    assert len(gmsh.model.getEntitiesForPhysicalGroup(1, master_tag)) > 0, "Master periodic boundary empty"
+    assert len(gmsh.model.getEntitiesForPhysicalGroup(1, slave_tag)) > 0, "Slave periodic boundary empty"
+    assert len(gmsh.model.getEntitiesForPhysicalGroup(1, slide_tag)) > 0, "Sliding interface empty"
 
 
 def test_builder_raises_error_for_invalid_slots(
