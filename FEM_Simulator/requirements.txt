@@ -3,5 +3,5 @@ pyvista
 gmsh
 # fenics-dolfinx  # install separately via conda-forge
 pytest
-pytest-qt
+# pytest-qt  # requires Qt bindings; optional for non-GUI tests
 pytest-image-diff 
