@@ -57,15 +57,15 @@ def test_build_succeeds_and_tags_correctly(
         assert exp in created_names, f"Expected Physical Group '{exp}' was not created"
 
     # Check critical boundaries are not empty
-    master_tag = gmsh.model.getPhysicalGroupsForName(
-        PhysicalGroup.BOUNDARY_PERIODIC_MASTER[0]
-    )[0]
-    slave_tag = gmsh.model.getPhysicalGroupsForName(
-        PhysicalGroup.BOUNDARY_PERIODIC_SLAVE[0]
-    )[0]
-    slide_tag = gmsh.model.getPhysicalGroupsForName(
-        PhysicalGroup.BOUNDARY_SLIDING_INTERFACE[0]
-    )[0]
+    def _get_tag(group_name: str, dim: int):
+        for d, t in phys_groups:
+            if d == dim and gmsh.model.getPhysicalName(d, t) == group_name:
+                return t
+        raise AssertionError(f"Physical group '{group_name}' not found")
+
+    master_tag = _get_tag(PhysicalGroup.BOUNDARY_PERIODIC_MASTER[0], 1)
+    slave_tag = _get_tag(PhysicalGroup.BOUNDARY_PERIODIC_SLAVE[0], 1)
+    slide_tag = _get_tag(PhysicalGroup.BOUNDARY_SLIDING_INTERFACE[0], 1)
 
     assert gmsh.model.getEntitiesForPhysicalGroup(1, master_tag), "Master periodic boundary empty"
     assert gmsh.model.getEntitiesForPhysicalGroup(1, slave_tag), "Slave periodic boundary empty"
