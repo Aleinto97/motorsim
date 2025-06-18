@@ -15,7 +15,7 @@ from .canvas import MainCanvas
 from .parameter_panel import ParameterPanel
 from .mesher_panel import MesherPanel
 from src.core.models import MotorParameters
-from src.geometry.builder import build_geometry
+from src.geometry.builder_sector import build_geometry_sector
 from src.analysis.solver import run_analysis
 
 
@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
     # Rendering helpers
     # ------------------------------------------------------------------
     def update_geometry_preview(self) -> None:
-        mesh = build_geometry(self.motor_model, mesh_2d=False)
+        mesh = build_geometry_sector(self.motor_model, mesh_params={}, mesh_2d=False)
         if mesh is None:
             return
         plotter = self.canvas.plotter
@@ -87,7 +87,12 @@ class MainWindow(QMainWindow):
         self._temp_mesh_file = tempfile.NamedTemporaryFile(suffix=".msh", delete=False)
         mesh_path = Path(self._temp_mesh_file.name)
 
-        mesh = build_geometry(self.motor_model, mesh_2d=True, save_path=str(mesh_path))
+        mesh = build_geometry_sector(
+            self.motor_model,
+            mesh_params={"global_size": 20},
+            mesh_2d=True,
+            save_path=str(mesh_path),
+        )
         if mesh is None:
             self.mesher_panel.info_box.setText("Meshing failed.")
             return

@@ -8,9 +8,14 @@ and generates a 2-D mesh ready for solver consumption.
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import gmsh
+import numpy as np
+import pyvista as pv
+
+from src.core.models import MotorParameters
+from src.geometry.builder import _points_and_faces as _faces_from_gmsh, _points_and_lines as _lines_from_gmsh
 
 __all__ = [
     "PhysicalGroup",
@@ -54,7 +59,13 @@ class PhysicalGroup:
 # Main builder – public API
 # -----------------------------------------------------------------------------
 
-def build_geometry_sector(motor_params: Dict, mesh_params: Dict) -> None:
+def build_geometry_sector(
+    motor_params: Union[Dict, MotorParameters],
+    mesh_params: Dict | None = None,
+    *,
+    mesh_2d: bool = False,
+    save_path: str | None = None,
+) -> pv.PolyData | None:
     """Create a watertight 2-D sector model via Gmsh OCC.
 
     Parameters
@@ -68,29 +79,41 @@ def build_geometry_sector(motor_params: Dict, mesh_params: Dict) -> None:
     that callers can directly query or export as they prefer.
     """
 
-    # ------------------------------------------------------------------
-    # 0.  Initialise a fresh model
-    # ------------------------------------------------------------------
-    gmsh.initialize()
-    gmsh.model.add(f"motor_sector_{motor_params.get('name', 'model')}")
+    if mesh_params is None:
+        mesh_params = {}
 
-    # ------------------------------------------------------------------
-    # 1.  Sector geometry fundamentals
-    # ------------------------------------------------------------------
-    n_slots = motor_params.get("num_slots", 12)
+    gmsh.initialize()
+
+    # Allow dataclass instance
+    if isinstance(motor_params, MotorParameters):
+        _mp = {
+            "name": getattr(motor_params, "name", "model"),
+            "num_slots": motor_params.stator.slot.Zs,
+            "stator_outer_radius": motor_params.stator.Rext,
+            "stator_inner_radius": motor_params.stator.Rint,
+            "rotor_outer_radius": motor_params.rotor.Rext,
+            "rotor_inner_radius": motor_params.rotor.Rint,
+            "slot_depth": motor_params.stator.slot.H2,
+            "slot_width": motor_params.stator.slot.W2,
+            "magnet_height": motor_params.rotor.hole_v.magnet_left.Hmag,
+        }
+    else:
+        _mp = motor_params  # type: ignore[assignment]
+
+    n_slots = _mp.get("num_slots", 12)
     if n_slots <= 0:
         raise ValueError("Number of slots (num_slots) must be a positive integer.")
 
     sector_angle = 2 * math.pi / n_slots
 
     # Extract radii and feature sizes
-    r_so = motor_params["stator_outer_radius"]
-    r_si = motor_params["stator_inner_radius"]
-    r_ro = motor_params["rotor_outer_radius"]
-    r_ri = motor_params["rotor_inner_radius"]
-    slot_depth = motor_params["slot_depth"]
-    slot_width = motor_params["slot_width"]
-    magnet_height = motor_params["magnet_height"]
+    r_so = _mp["stator_outer_radius"]
+    r_si = _mp["stator_inner_radius"]
+    r_ro = _mp["rotor_outer_radius"]
+    r_ri = _mp["rotor_inner_radius"]
+    slot_depth = _mp["slot_depth"]
+    slot_width = _mp["slot_width"]
+    magnet_height = _mp["magnet_height"]
 
     # Sliding interface radius (mid-air-gap)
     r_slide = r_ro + (r_si - r_ro) / 2.0
@@ -230,10 +253,27 @@ def build_geometry_sector(motor_params: Dict, mesh_params: Dict) -> None:
 
     gmsh.model.mesh.generate(2)
 
+    # ------------------------------------------------------------------
+    # 7.  Export / convert
+    # ------------------------------------------------------------------
+    if save_path is not None:
+        gmsh.write(save_path)
+
+    pv_mesh: pv.PolyData | None = None
+    try:
+        if mesh_2d:
+            pv_mesh = _faces_from_gmsh()
+        else:
+            pv_mesh = _lines_from_gmsh()
+    except Exception:
+        pv_mesh = None
+
     if mesh_params.get("interactive", False):
         gmsh.fltk.run()
 
     print("Sector model built and meshed successfully.")
+
+    return pv_mesh
 
 # -----------------------------------------------------------------------------
 # End of file 
