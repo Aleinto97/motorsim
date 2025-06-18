@@ -187,7 +187,7 @@ def build_geometry_sector(motor_params: Dict, mesh_params: Dict) -> None:
         r, theta = r_theta(x, y)
 
         # Sliding interface
-        if abs(r - r_slide) < 1e-2:
+        if abs(r - r_slide) < 1e-2 or abs(r - r_ro) < 1e-2:
             phys_groups[PhysicalGroup.BOUNDARY_SLIDING_INTERFACE[0]].append(tag)
         # Stator outer boundary
         elif abs(r - r_so) < 1e-3:
