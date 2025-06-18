@@ -108,6 +108,6 @@ class MainWindow(QMainWindow):
     def run_solver(self, mesh_path: Path) -> None:
         """Invoked when the user clicks the Run Analysis button."""
         phase_currents = self.mesher_panel.get_phase_currents()
-        results = run_analysis(mesh_path, phase_currents)
+        results = run_analysis(mesh_path, phase_currents, model=self.motor_model)
         if results and results.get("grid") is not None:
             self.canvas.display_solution(results["grid"])
