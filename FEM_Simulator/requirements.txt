@@ -1,0 +1,7 @@
+numpy
+pyvista
+gmsh
+fenics-dolfinx
+pytest
+pytest-qt
+pytest-image-diff 
