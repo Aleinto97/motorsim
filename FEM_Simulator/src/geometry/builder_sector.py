@@ -198,6 +198,19 @@ def build_geometry_sector(motor_params: Dict, mesh_params: Dict) -> None:
         elif abs(theta - sector_angle) < 1e-3 and r > r_ri:
             phys_groups[PhysicalGroup.BOUNDARY_PERIODIC_SLAVE[0]].append(tag)
 
+    # Fallback: if slave periodic boundary not found, pick radial curve with
+    # the largest polar angle (> 0) among remaining candidates.
+    if not phys_groups[PhysicalGroup.BOUNDARY_PERIODIC_SLAVE[0]]:
+        candidates: list[tuple[float, int]] = []
+        for _, tag in gmsh.model.getEntities(1):
+            x, y, _ = gmsh.model.occ.getCenterOfMass(1, tag)
+            r, theta = r_theta(x, y)
+            if r > r_ri + 1e-6 and theta > 1e-4:  # exclude master at ~0
+                candidates.append((theta, tag))
+        if candidates:
+            theta_max, tag_max = max(candidates, key=lambda t: t[0])
+            phys_groups[PhysicalGroup.BOUNDARY_PERIODIC_SLAVE[0]].append(tag_max)
+
     # Create physical groups in the model
     for name, dim in PhysicalGroup.items():
         tags = phys_groups[name]
